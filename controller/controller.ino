@@ -7,6 +7,9 @@
 #define LCD_PRESENT true
 #define LCD_ADDRESS 0x27
 #define TEMP_CALIBRATION true
+#define PHOTO_TRIAC_PIN 13
+#define HEATING_TIME 2  //ASSUMPTION (MIGHT BE INCORRECT!)
+#define INCREMENT_PERIOD 60000
 
 // Setup the LCD Matrix
 LiquidCrystal_I2C lcd(LCD_ADDRESS,20,4);
@@ -34,6 +37,11 @@ PID pid = PID(dt, max_out, min_out, Kp, Kd, Ki);
 // Variables for test/debug
 double test_setpoint = 60;
 
+//Variables for the heating sequence
+unsigned long heating_started_time;
+unsigned long prev_minute_time;
+int can_heat = 1;
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
@@ -46,6 +54,10 @@ void setup() {
     lcd.backlight();
     lcd.clear();
   }
+
+  pinMode(PHOTO_TRIAC_PIN, OUTPUT);
+
+  prev_minute_time = millis();
 }
 
 void loop() {
@@ -79,6 +91,22 @@ void loop() {
 
   // Calculate this interval's control output
   double control_output = pid.calculate(test_setpoint, avg_temp);
+
+  //actuate the heater 
+  if(control_output != 0 && can_heat){
+    heating_started_time = millis();
+    digitalWrite(PHOTO_TRIAC_PIN, 1);
+    can_heat = 0;
+  }else if(millis() - heating_started_time >= HEATING_TIME * control_output){
+      digitalWrite(PHOTO_TRIAC_PIN, 0);
+      can_heat = 1;
+  }
+  
+  //checking the 1 minute passage
+  if(millis() - prev_minute_time >= INCREMENT_PERIOD){
+    test_setpoint = test_setpoint + 1 > 160 ? test_setpoint + 1 : 160;
+    prev_minute_time = millis();
+  }
 
   if (LCD_PRESENT) {
     // Refresh the LCD screen
