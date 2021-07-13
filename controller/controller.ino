@@ -8,8 +8,10 @@
 #define LCD_ADDRESS 0x27
 #define TEMP_CALIBRATION true
 #define PHOTO_TRIAC_PIN 13
-#define HEATING_TIME 2  //ASSUMPTION (MIGHT BE INCORRECT!)
-#define INCREMENT_PERIOD 60000
+#define MAX_TEMPERATURE 142     // In Farenheit
+#define CURE_TIME 8*3600        // Corresponds to ~142 Franeheit (different when MAX_TEMPERATURE is different)
+#define HEATING_TIME 2          // ASSUMPTION (This is the time for the heater to go up by 1 Celsius/Farenheit)
+#define INCREMENT_PERIOD 60000  // Increment the temperature every minute
 
 // Setup the LCD Matrix
 LiquidCrystal_I2C lcd(LCD_ADDRESS,20,4);
@@ -38,7 +40,7 @@ PID pid = PID(dt, max_out, min_out, Kp, Kd, Ki);
 double test_setpoint = 60;
 
 //Variables for the heating sequence
-unsigned long heating_started_time;
+unsigned long heating_started_time = 0;
 unsigned long prev_minute_time;
 int can_heat = 1;
 
@@ -56,7 +58,8 @@ void setup() {
   }
 
   pinMode(PHOTO_TRIAC_PIN, OUTPUT);
-
+  
+  //starting point of the program (for the heating sequence)
   prev_minute_time = millis();
 }
 
@@ -92,20 +95,27 @@ void loop() {
   // Calculate this interval's control output
   double control_output = pid.calculate(test_setpoint, avg_temp);
 
-  //actuate the heater 
-  if(control_output != 0 && can_heat){
-    heating_started_time = millis();
-    digitalWrite(PHOTO_TRIAC_PIN, 1);
-    can_heat = 0;
-  }else if(millis() - heating_started_time >= HEATING_TIME * control_output){
-      digitalWrite(PHOTO_TRIAC_PIN, 0);
-      can_heat = 1;
+  // Shut the oven down after the cure time passes
+  if((millis() - prev_minute_time >= CURE_TIME) && (test_setpoint == MAX_TEMPERATURE)){
+    digitalWrite(PHOTO_TRIAC_PIN, 0);
   }
-  
-  //checking the 1 minute passage
-  if(millis() - prev_minute_time >= INCREMENT_PERIOD){
-    test_setpoint = test_setpoint + 1 > 160 ? test_setpoint + 1 : 160;
-    prev_minute_time = millis();
+  else
+  {
+    // Actuate the heater 
+    if(control_output > 0 && can_heat){
+      heating_started_time = millis();
+      digitalWrite(PHOTO_TRIAC_PIN, 1);
+      can_heat = 0;
+    }else if(millis() - heating_started_time >= HEATING_TIME * control_output){
+        digitalWrite(PHOTO_TRIAC_PIN, 0);
+        can_heat = 1;
+    }
+
+    // Increase the temperature by 2 Farenheit every minute until max temperature is reached
+    if((millis() - prev_minute_time >= INCREMENT_PERIOD) && (test_setpoint < MAX_TEMPERATURE)){
+      test_setpoint = test_setpoint + 2 > MAX_TEMPERATURE ? MAX_TEMPERATURE : test_setpoint + 2;
+      prev_minute_time = millis();
+    }
   }
 
   if (LCD_PRESENT) {
